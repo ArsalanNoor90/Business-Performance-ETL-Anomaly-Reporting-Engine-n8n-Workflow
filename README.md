@@ -29,11 +29,14 @@ An enterprise-grade automated ETL, metric aggregation, and anomaly detection eng
 
 | Workflow Architecture | Data Quality & KPI Engine |
 | :---: | :---: |
-| ![n8n ETL Workflow Canvas](screenshots/n8n-etl-workflow.png) | ![KPI Calculation & Validation](screenshots/kpi-validation-node.png) |
+| ![n8n ETL Workflow Canvas](Screenshot 2026-09-16 165653.png) | ![KPI Calculation & Validation](Screenshot 2026-09-16 165626.png) |
 
 | Master Daily KPI Ledger & Anomaly Log |
 | :---: |
-| ![Google Sheets KPI Database]() |
+| ![Google Sheets KPI Database]
+(Screenshot 2026-09-16 165444.png
+Screenshot 2026-09-16 165546.png
+) |
 
 ---
 
