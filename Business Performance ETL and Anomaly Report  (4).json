@@ -113,7 +113,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bearer pit-c746fa7f-c099-4533-81ef-43216e9254c6"
+              "value": "your GHL private......token here"
             },
             {
               "name": "version",
@@ -485,7 +485,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bearer pit-c746fa7f-c099-4533-81ef-43216e9254c6"
+              "value": "your GHL private....token here"
             },
             {
               "name": "version",
