@@ -6,7 +6,7 @@ An enterprise-grade automated ETL, metric aggregation, and anomaly detection eng
 
 ## 🎬 Live Demo & Walkthrough
 
-> 🚀 **[▶️ Watch Full Workflow Execution Demo](https://www.linkedin.com/posts/arsalan-noor-1510492bb_n8n-automation-artificialintelligence-activity-7505002228081078272-2OHW)**  
+> 🚀 **[▶️ Watch Full Workflow Execution Demo](www.linkedin.com/in/arsalan-noor-1510492bb)**  
 > **Platform:** LinkedIn / Loom Video Walkthrough  
 > **What You'll See:** Real-time GHL API pagination ➔ Multi-source dataset merging ➔ Safe zero-division KPI calculations ➔ 7-Day baseline anomaly engine ➔ Google Sheets persistence & Gmail summary dispatch.
 
@@ -31,9 +31,9 @@ An enterprise-grade automated ETL, metric aggregation, and anomaly detection eng
 | :---: | :---: |
 | ![n8n ETL Workflow Canvas](Screenshot%202026-09-16%20165653.png) | ![KPI Calculation & Validation](Screenshot%202026-09-16%20165626.png) |
 
-| Master Daily KPI Ledger & Anomaly Log |
-| :---: |
-| ![Google Sheets KPI Database](Screenshot%202026-09-16%20165444.png) |
+| Master Daily KPI Ledger | Execution & Anomaly Log |
+| :---: | :---: |
+| ![Google Sheets KPI Database](Screenshot%202026-09-16%20165444.png) | ![Run Execution Log](Screenshot%202026-09-16%20165546.png) |
 
 ---
 
