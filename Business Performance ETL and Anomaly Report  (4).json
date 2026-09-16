@@ -535,7 +535,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bearer b2d44831-74b0-48f6-b4e8-23e4d1bc1317"
+              "value": "your GHL private....token here"
             }
           ]
         },
