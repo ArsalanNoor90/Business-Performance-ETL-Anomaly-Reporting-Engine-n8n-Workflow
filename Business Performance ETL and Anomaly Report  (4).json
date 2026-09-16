@@ -1,0 +1,1199 @@
+{
+  "name": "Business Performance ETL and Anomaly Report  (4)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -960,
+        -176
+      ],
+      "id": "d2b9560f-22cf-4e5d-9e6e-543442b729bd",
+      "name": "Daily Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst pakistanDate = new Intl.DateTimeFormat('en-CA', {\n  timeZone: 'Asia/Karachi',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit'\n}).format(now);\nconst [year, month, day] = pakistanDate.split('-').map(Number);\nconst yesterday = new Date(Date.UTC(year, month - 1, day - 1));\nconst y = yesterday.getUTCFullYear();\nconst m = String(yesterday.getUTCMonth() + 1).padStart(2, '0');\nconst d = String(yesterday.getUTCDate()).padStart(2, '0');\n\n// Pakistan local time strings (for display/reporting)\nconst reporting_start_local = `${y}-${m}-${d}T00:00:00+05:00`;\nconst reporting_end_local = `${y}-${m}-${d}T23:59:59.999+05:00`;\n\n// UTC equivalents (for APIs like Vapi that need Z format, no + sign)\nconst reporting_start_utc = new Date(reporting_start_local).toISOString();\nconst reporting_end_utc = new Date(reporting_end_local).toISOString();\n\nreturn [\n  {\n    json: {\n      report_date: `${y}-${m}-${d}`,\n      reporting_start_local,\n      reporting_end_local,\n      reporting_start_utc,\n      reporting_end_utc,\n      timezone: 'Asia/Karachi'\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        -176
+      ],
+      "id": "d44839ae-099b-47a4-ad87-bcbfb623c7af",
+      "name": "Set Reporting Window"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://services.leadconnectorhq.com/contacts/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": []
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": " Authorization",
+              "value": "Bearer pit-c746fa7f-c099-4533-81ef-43216e9254c6"
+            },
+            {
+              "name": "Version",
+              "value": " 2021-07-28"
+            },
+            {
+              "name": " Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"locationId\": \"rBwjNqQuvnUHTP9Xg9XU\",\n  \"pageLimit\": 10\n}",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "searchAfter",
+                    "value": "={{ $response.body.contacts.at(-1).searchAfter }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.contacts.length < 10 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 10,
+              "requestInterval": 100
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -224,
+        -560
+      ],
+      "id": "aee63768-66f1-4d4b-b9d4-b869c42bd6d0",
+      "name": "Fetch GHL Contacts with Pagination"
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = [];\nfor (const item of $input.all()) {\n  const contacts = item.json.contacts || [];\n  for (const contact of contacts) {\n    output.push({\n      json: {\n        contact_id: contact.id || \"\",\n        created_at: contact.dateAdded || \"\",\n        source: contact.source || \"\",\n        appointment_status: \"\", // Contacts API doesn't have this directly, will merge later from Appointments dataset\n        opportunity_status: contact.opportunities?.[0]?.status || \"\",\n        revenue: contact.opportunities?.[0]?.monetaryValue || 0,\n        first_outbound_at: \"\" // Placeholder — depends on voice-call data merge later\n      }\n    });\n  }\n}\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -560
+      ],
+      "id": "84cc8153-82eb-4838-8ec0-bacb8493931e",
+      "name": "Normalize GHL Contacts"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://services.leadconnectorhq.com/opportunities/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer pit-c746fa7f-c099-4533-81ef-43216e9254c6"
+            },
+            {
+              "name": "version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"locationId\": \"rBwjNqQuvnUHTP9Xg9XU\",\n  \"limit\": 10\n} ",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.opportunities.length < 10 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 10,
+              "requestInterval": 100
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -224,
+        -352
+      ],
+      "id": "8643250b-6e1c-4cb2-8935-b8a2508385a1",
+      "name": "Fetch GHL Opportunities with Pagination"
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = [];\nfor (const item of $input.all()) {\n  const opportunities = item.json.opportunities || [];\n  for (const opportunity of opportunities) {\n    output.push({\n      json: {\n        contact_id: opportunity.contactId || \"\",\n        created_at: opportunity.createdAt || \"\",\n        source: opportunity.source || opportunity.customFields?.[0]?.fieldValueString || \"\",\n        appointment_status: \"\",\n        opportunity_status: opportunity.status || \"\",\n        revenue: opportunity.monetaryValue || 0,\n        first_outbound_at: \"\"\n      }\n    });\n  }\n}\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        -352
+      ],
+      "id": "4bb47073-7e34-4d23-a21d-f57621217bb1",
+      "name": "Normalize GHL Opportunities"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "advanced": true,
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "contact_id",
+              "field2": "contact_id"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        400,
+        -448
+      ],
+      "id": "b9b6143d-f5ad-40f0-8338-66c105da7cc6",
+      "name": "Match Contacts with Opportunities",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = [];\nfor (const item of $input.all()) {\n  const data = item.json;\n  output.push({\n    json: {\n      contact_id: data.contact_id || null,\n      created_at: data.created_at || null,\n      source: data.source || null,\n      appointment_status: data.appointment_status || \"\",\n      opportunity_status: data.opportunity_status || null,\n      revenue: data.revenue || 0,\n      first_outbound_at: data.first_outbound_at || \"\"\n    }\n  });\n}\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        -448
+      ],
+      "id": "4708e32a-aa7e-40e9-b9c8-913df08f600d",
+      "name": "Prepare Daily Report Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// safeDivide helper (doc requirement)\nfunction safeDivide(numerator, denominator) {\n  return denominator ? numerator / denominator : 0;\n}\nfunction roundPercent(val) {\n  return Math.round(val * 10000) / 100; // 2 decimal places, as percentage\n}\n\n// Separate datasets based on normalized fields\nconst opportunityItems = items.filter(item => item.json.opportunity_status !== undefined && item.json.opportunity_status !== null);\nconst appointmentItems = items.filter(item => item.json.appointment_id);\nconst voiceCallItems = items.filter(item => item.json.call_id);\nconst adSpendItems = items.filter(item => item.json.ad_spend !== undefined);\n\n// -----------------------------\n// OPPORTUNITY METRICS\n// -----------------------------\nconst uniqueLeads = new Set(opportunityItems.map(item => item.json.contact_id)).size;\nconst wonOpportunities = opportunityItems.filter(item => item.json.opportunity_status === 'won').length;\nconst lostOpportunities = opportunityItems.filter(item => item.json.opportunity_status === 'lost').length;\nconst qualifiedOpportunities = opportunityItems.filter(item =>\n  ['open', 'won', 'lost'].includes(item.json.opportunity_status)\n).length;\nconst wonRevenue = opportunityItems\n  .filter(item => item.json.opportunity_status === 'won')\n  .reduce((sum, item) => sum + Number(item.json.revenue || 0), 0);\n\n// -----------------------------\n// APPOINTMENT METRICS\n// -----------------------------\nconst appointmentsBooked = appointmentItems.length;\nconst appointmentsScheduled = appointmentItems.filter(item =>\n  item.json.appointment_status === 'confirmed' || item.json.appointment_status === 'scheduled'\n).length;\nconst appointmentsShowed = appointmentItems.filter(item => item.json.appointment_status === 'showed').length;\nconst totalNoShows = appointmentItems.filter(item =>\n  item.json.appointment_status === 'noshow' || item.json.appointment_status === 'no_show'\n).length;\nconst rebookedNoShows = appointmentItems.filter(item => item.json.appointment_status === 'rebooked').length;\n\n// -----------------------------\n// VOICE CALL METRICS (speed to lead)\n// -----------------------------\nlet speedToLeadSeconds = 0;\nconst leadWithOutbound = opportunityItems.find(item => item.json.first_outbound_at && item.json.created_at);\nif (leadWithOutbound) {\n  const created = new Date(leadWithOutbound.json.created_at).getTime();\n  const outbound = new Date(leadWithOutbound.json.first_outbound_at).getTime();\n  if (!isNaN(created) && !isNaN(outbound)) {\n    speedToLeadSeconds = (outbound - created) / 1000;\n  }\n}\n\n// -----------------------------\n// AD-SPEND\n// -----------------------------\nconst totalAdSpend = adSpendItems.reduce((sum, item) => sum + Number(item.json.ad_spend || 0), 0);\n\n// -----------------------------\n// REQUIRED KPIs (doc table, exact formulas)\n// -----------------------------\nconst leadToAppointmentRate = safeDivide(appointmentsBooked, uniqueLeads);\nconst showRate = safeDivide(appointmentsShowed, appointmentsScheduled);\nconst closeRate = safeDivide(wonOpportunities, qualifiedOpportunities);\nconst costPerLead = safeDivide(totalAdSpend, uniqueLeads);\nconst costPerAppointment = safeDivide(totalAdSpend, appointmentsBooked);\nconst revenuePerLead = safeDivide(wonRevenue, uniqueLeads);\nconst noShowRecoveryRate = safeDivide(rebookedNoShows, totalNoShows);\n\nreturn [\n  {\n    json: {\n      report_date: $('Set Reporting Window').first().json.report_date,\n\n      // Raw counts (for reference)\n      unique_leads: uniqueLeads,\n      won_opportunities: wonOpportunities,\n      lost_opportunities: lostOpportunities,\n      qualified_opportunities: qualifiedOpportunities,\n      won_revenue: wonRevenue,\n      appointments_booked: appointmentsBooked,\n      appointments_scheduled: appointmentsScheduled,\n      appointments_showed: appointmentsShowed,\n      total_no_shows: totalNoShows,\n      rebooked_no_shows: rebookedNoShows,\n      total_ad_spend: totalAdSpend,\n      speed_to_lead_seconds: speedToLeadSeconds,\n\n      // Required KPIs (doc formulas)\n      lead_to_appointment_rate: roundPercent(leadToAppointmentRate),\n      show_rate: roundPercent(showRate),\n      close_rate: roundPercent(closeRate),\n      cost_per_lead: Math.round(costPerLead * 100) / 100,\n      cost_per_appointment: Math.round(costPerAppointment * 100) / 100,\n      revenue_per_lead: Math.round(revenuePerLead * 100) / 100,\n      speed_to_lead_minutes: Math.round(speedToLeadSeconds / 60),\n      no_show_recovery_rate: roundPercent(noShowRecoveryRate),\n\n      generated_at: new Date().toISOString()\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        -160
+      ],
+      "id": "e561e97a-1c9d-4d4f-a842-2cd84d3d41dd",
+      "name": "Calculate Daily Metrics"
+    },
+    {
+      "parameters": {
+        "jsCode": "const metrics = $('Calculate Daily Metrics').first().json;\nconst anomalyData = $('Detect Anomalies').first().json;\n\nconst anomalySection = anomalyData.anomaly_detected\n  ? anomalyData.anomalies.map(a => `  - ${a.issue} (Current: ${a.current}, Baseline: ${a.baseline ?? 'N/A'})`).join('\\n')\n  : (anomalyData.baseline_available ? '  No anomalies detected.' : '  Baseline not available yet — comparison skipped.');\n\nconst report = `\nDAILY HVAC REPORT\n=================\nReport Date: ${metrics.report_date}\n\nMAIN KPIs\n---------\nUnique Leads: ${metrics.unique_leads}\nAppointments Booked: ${metrics.appointments_booked}\nLead-to-Appointment Rate: ${metrics.lead_to_appointment_rate}%\nShow Rate: ${metrics.show_rate}%\nClose Rate: ${metrics.close_rate}%\nCost per Lead: $${metrics.cost_per_lead}\nCost per Appointment: $${metrics.cost_per_appointment}\nRevenue per Lead: $${metrics.revenue_per_lead}\nSpeed to Lead: ${metrics.speed_to_lead_minutes} minutes\nNo-Show Recovery Rate: ${metrics.no_show_recovery_rate}%\nTotal Ad Spend: $${metrics.total_ad_spend}\n\nANOMALIES\n---------\n${anomalySection}\n\nDATA QUALITY\n------------\nWarning Count: ${anomalyData.data_quality_warning_count}\n\nGenerated At: ${metrics.generated_at}\n`;\n\nreturn [\n  {\n    json: {\n      report_date: metrics.report_date,\n      unique_leads: metrics.unique_leads,\n      appointments_booked: metrics.appointments_booked,\n      lead_to_appointment_rate: metrics.lead_to_appointment_rate,\n      show_rate: metrics.show_rate,\n      close_rate: metrics.close_rate,\n      cost_per_lead: metrics.cost_per_lead,\n      cost_per_appointment: metrics.cost_per_appointment,\n      revenue_per_lead: metrics.revenue_per_lead,\n      speed_to_lead_minutes: metrics.speed_to_lead_minutes,\n      no_show_recovery_rate: metrics.no_show_recovery_rate,\n      total_ad_spend: metrics.total_ad_spend,\n      anomaly_detected: anomalyData.anomaly_detected,\n      anomaly_count: anomalyData.anomaly_count || 0,\n      data_quality_warning_count: anomalyData.data_quality_warning_count,\n      report_text: report.trim()\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        -160
+      ],
+      "id": "49d4c53b-d242-4b37-9b3e-dfd71fdd5fc0",
+      "name": "Format Daily Report"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1VK23VBr06iDtU4teig38g8OhiplDTIG26Zs8u_rGr2Y",
+          "mode": "list",
+          "cachedResultName": "Daily Report Google Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VK23VBr06iDtU4teig38g8OhiplDTIG26Zs8u_rGr2Y/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VK23VBr06iDtU4teig38g8OhiplDTIG26Zs8u_rGr2Y/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "report_date": "={{ $json.report_date }}",
+            "report_text": "={{ $json.report_text }}",
+            "unique_leads": "={{ $json.unique_leads }}",
+            "appointments_booked": "={{ $json.appointments_booked }}",
+            "lead_to_appointment_rate": "={{ $json.lead_to_appointment_rate }}",
+            "show_rate": "={{ $json.show_rate }}",
+            "close_rate": "={{ $json.close_rate }}",
+            "cost_per_lead": "={{ $json.cost_per_lead }}",
+            "cost_per_appointment": "={{ $json.cost_per_appointment }}",
+            "revenue_per_lead": "={{ $json.revenue_per_lead }}",
+            "speed_to_lead_minutes": "={{ $json.speed_to_lead_minutes }}",
+            "no_show_recovery_rate": "={{ $json.no_show_recovery_rate }}",
+            "total_ad_spend": "={{ $json.total_ad_spend }}",
+            "anomaly_detected": "={{ $json.anomaly_detected }}",
+            "anomaly_count": "={{ $json.anomaly_count }}",
+            "data_quality_warning_count": "={{ $json.data_quality_warning_count }}"
+          },
+          "matchingColumns": [
+            "report_date"
+          ],
+          "schema": [
+            {
+              "id": "report_date",
+              "displayName": "report_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "unique_leads",
+              "displayName": "unique_leads",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "appointments_booked",
+              "displayName": "appointments_booked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lead_to_appointment_rate",
+              "displayName": "lead_to_appointment_rate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "show_rate",
+              "displayName": "show_rate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "close_rate",
+              "displayName": "close_rate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cost_per_lead",
+              "displayName": "cost_per_lead",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cost_per_appointment",
+              "displayName": "cost_per_appointment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "revenue_per_lead",
+              "displayName": "revenue_per_lead",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "speed_to_lead_minutes",
+              "displayName": "speed_to_lead_minutes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "no_show_recovery_rate",
+              "displayName": "no_show_recovery_rate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "total_ad_spend",
+              "displayName": "total_ad_spend",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "anomaly_detected",
+              "displayName": "anomaly_detected",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "anomaly_count",
+              "displayName": "anomaly_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "data_quality_warning_count",
+              "displayName": "data_quality_warning_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "report_text",
+              "displayName": "report_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2160,
+        -160
+      ],
+      "id": "60ee8f80-c706-4698-954a-0c70f4a67202",
+      "name": "Save Daily Report to Google Sheets",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gml6w6xc7PBsxQRc",
+          "name": "Google Sheets account 19"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://services.leadconnectorhq.com/calendars/events",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "locationId",
+              "value": "rBwjNqQuvnUHTP9Xg9XU"
+            },
+            {
+              "name": "startTime",
+              "value": "={{ new Date($json.reporting_start_local).getTime() }}"
+            },
+            {
+              "name": "endTime",
+              "value": "={{ new Date($json.reporting_end_local).getTime() }}"
+            },
+            {
+              "name": "calendarId",
+              "value": "24bFsnfTFYqvzNg8EKOj"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer pit-c746fa7f-c099-4533-81ef-43216e9254c6"
+            },
+            {
+              "name": "version",
+              "value": " 2021-07-28"
+            },
+            {
+              "name": " Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "off"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -224,
+        -160
+      ],
+      "id": "c3e6b310-342b-48ed-8059-27f663772a62",
+      "name": "Fetch GHL Appointments with Pagination"
+    },
+    {
+      "parameters": {
+        "url": "https://api.vapi.ai/call",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "createdAtGe",
+              "value": "={{ $('Set Reporting Window').item.json.reporting_start_utc }}"
+            },
+            {
+              "name": "createdAtLe",
+              "value": "={{ $('Set Reporting Window').item.json.reporting_end_utc }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer b2d44831-74b0-48f6-b4e8-23e4d1bc1317"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "off"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -224,
+        48
+      ],
+      "id": "cdd3c8bf-8627-45ea-a524-748aa7f80ef6",
+      "name": "Fetch Voice-Call Data",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\n\nconst output = allItems.map(item => {\n  const call = item.json;\n  const startedAt = call.startedAt ? new Date(call.startedAt) : null;\n  const endedAt = call.endedAt ? new Date(call.endedAt) : null;\n  let durationSeconds = null;\n  if (startedAt && endedAt && !isNaN(startedAt) && !isNaN(endedAt)) {\n    durationSeconds = Math.round((endedAt - startedAt) / 1000);\n  }\n  return {\n    json: {\n      call_id: call.id ?? null,\n      assistant_id: call.assistantId ?? null,\n      call_type: call.type ?? null,\n      started_at: call.startedAt ?? null,\n      ended_at: call.endedAt ?? null,\n      duration_seconds: durationSeconds,\n      status: call.status ?? null,\n      ended_reason: call.endedReason ?? null,\n      cost: call.cost ?? 0,\n      customer_phone: call.customer?.number ?? call.phoneNumber ?? null,\n      transcript: call.transcript ?? null,\n      summary: call.summary ?? null,\n      created_at: call.createdAt ?? null,\n      updated_at: call.updatedAt ?? null\n    }\n  };\n});\n\nconst filtered = output.filter(o => o.json.call_id !== null);\nif (filtered.length === 0) {\n  return [{ json: {} }];\n}\nreturn filtered;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        48
+      ],
+      "id": "a79484fa-1c26-4fe3-8c94-3e253096f357",
+      "name": "Normalize Voice Calls"
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = [];\nfor (const item of items) {\n  const events = item.json.events || [];\n  for (const event of events) {\n    output.push({\n      json: {\n        appointment_id: event.id ?? null,\n        contact_id: event.contactId ?? null,\n        calendar_id: event.calendarId ?? null,\n        location_id: event.locationId ?? null,\n        appointment_status: event.appointmentStatus ?? event.appoinmentStatus ?? null,\n        assigned_user_id: event.assignedUserId ?? null,\n        start_time: event.startTime ?? null,\n        end_time: event.endTime ?? null,\n        title: event.title ?? null,\n        address: event.address ?? null,\n        is_recurring: event.isRecurring ?? false,\n        deleted: event.deleted ?? false,\n        created_at: event.dateAdded ?? null,\n        updated_at: event.dateUpdated ?? null\n      }\n    });\n  }\n}\n\n// Agar koi appointments na hon, ek empty placeholder return karo taake workflow crash na ho\nif (output.length === 0) {\n  return [{ json: {} }];\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        -160
+      ],
+      "id": "b36af715-aa8d-4cd2-b028-a1141e52d8ed",
+      "name": "Normalize GHL Appointments",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\nconst seenAppointmentIds = new Set();\nconst duplicateAppointmentIds = new Set();\n\n// Pehle pass: duplicate appointment IDs dhoondo\nfor (const item of allItems) {\n  const data = item.json;\n  if (data.appointment_id) {\n    if (seenAppointmentIds.has(data.appointment_id)) {\n      duplicateAppointmentIds.add(data.appointment_id);\n    }\n    seenAppointmentIds.add(data.appointment_id);\n  }\n}\n\nconst validOpportunityStatuses = ['open', 'won', 'lost', 'abandoned'];\nlet totalWarningCount = 0;\n\nconst output = allItems.map(item => {\n  const data = item.json;\n  const errors = [];\n  let recordType = 'unknown';\n\n  // Helper: valid timestamp check\n  const isValidTimestamp = (val) => {\n    if (!val) return false;\n    const d = new Date(val);\n    return !isNaN(d.getTime());\n  };\n\n  // -----------------------------\n  // OPPORTUNITY RECORD\n  // -----------------------------\n  if (data.opportunity_id || (data.hasOwnProperty('opportunity_status') && data.opportunity_status)) {\n    recordType = 'opportunity';\n    if (!data.contact_id) errors.push('Missing contact_id');\n    if (data.created_at && !isValidTimestamp(data.created_at)) errors.push('Invalid created_at timestamp');\n    if (typeof data.revenue === 'number' && data.revenue < 0) errors.push('Negative revenue');\n    if (data.opportunity_status && !validOpportunityStatuses.includes(data.opportunity_status)) {\n      errors.push('Unknown opportunity status');\n    }\n  }\n  // -----------------------------\n  // APPOINTMENT RECORD\n  // -----------------------------\n  else if (data.appointment_id) {\n    recordType = 'appointment';\n    if (!data.contact_id) errors.push('Missing contact_id');\n    if (data.start_time && !isValidTimestamp(data.start_time)) errors.push('Invalid start_time timestamp');\n    if (data.end_time && !isValidTimestamp(data.end_time)) errors.push('Invalid end_time timestamp');\n    if (!data.appointment_status) errors.push('Missing appointment status');\n    if (duplicateAppointmentIds.has(data.appointment_id)) errors.push('Duplicate appointment_id');\n  }\n  // -----------------------------\n  // VOICE CALL RECORD\n  // -----------------------------\n  else if (data.call_id) {\n    recordType = 'voice_call';\n    if (data.started_at && !isValidTimestamp(data.started_at)) errors.push('Invalid started_at timestamp');\n    if (!data.status) errors.push('Missing call status');\n    if (data.duration_seconds !== undefined && Number.isNaN(Number(data.duration_seconds))) {\n      errors.push('Invalid duration_seconds');\n    }\n    if (data.cost !== undefined && Number.isNaN(Number(data.cost))) {\n      errors.push('Invalid call cost');\n    }\n  }\n  // -----------------------------\n  // AD-SPEND RECORD\n  // -----------------------------\n  else if (data.ad_spend !== undefined) {\n    recordType = 'ad_spend';\n    if (!data.campaign_id) errors.push('Ad spend with no matching campaign identifier');\n    if (typeof data.ad_spend === 'number' && data.ad_spend < 0) errors.push('Negative ad spend');\n  }\n  // -----------------------------\n  // EMPTY/UNKNOWN RECORD\n  // -----------------------------\n  else if (Object.keys(data).length === 0) {\n    recordType = 'empty';\n  }\n  else {\n    errors.push('Unknown record type');\n  }\n\n  totalWarningCount += errors.length;\n\n  return {\n    json: {\n      ...data,\n      data_quality: {\n        record_type: recordType,\n        status: errors.length === 0 ? 'valid' : 'invalid',\n        error_count: errors.length,\n        errors: errors\n      }\n    }\n  };\n});\n\n// Total warning count ko har item mein add karo (report ke liye globally accessible)\nreturn output.map(item => ({\n  json: {\n    ...item.json,\n    data_quality_warning_count: totalWarningCount\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        -160
+      ],
+      "id": "15fb4730-dd6a-4905-84a3-2cc441859680",
+      "name": "Validate Data Quality"
+    },
+    {
+      "parameters": {
+        "jsCode": "const baseline = $input.first().json;\nconst current = $('Calculate Daily Metrics').first().json;\nconst dataQuality = $('Validate Data Quality').first().json;\nconst warningCount = dataQuality.data_quality_warning_count || 0;\n\nif (!baseline.baseline_available) {\n  return [\n    {\n      json: {\n        report_date: current.report_date,\n        baseline_available: false,\n        anomaly_detected: false,\n        anomaly_status: 'baseline_not_available',\n        message: 'No previous historical reports are available yet. Anomaly detection will begin once historical data exists.',\n        anomalies: [],\n        data_quality_warning_count: warningCount\n      }\n    }\n  ];\n}\n\nconst anomalies = [];\n\n// 1. Lead volume falls more than 35% against 7-day average\nconst leadDropPercent = baseline.avg_unique_leads\n  ? ((baseline.avg_unique_leads - current.unique_leads) / baseline.avg_unique_leads) * 100\n  : 0;\nif (leadDropPercent > 35) {\n  anomalies.push({\n    metric: 'unique_leads',\n    issue: 'Lead volume dropped more than 35%',\n    current: current.unique_leads,\n    baseline: baseline.avg_unique_leads,\n    change_percent: Number(leadDropPercent.toFixed(2))\n  });\n}\n\n// 2. Cost per lead increases more than 30%\nconst costPerLeadIncreasePercent = baseline.avg_cost_per_lead\n  ? ((current.cost_per_lead - baseline.avg_cost_per_lead) / baseline.avg_cost_per_lead) * 100\n  : 0;\nif (costPerLeadIncreasePercent > 30) {\n  anomalies.push({\n    metric: 'cost_per_lead',\n    issue: 'Cost per lead increased more than 30%',\n    current: current.cost_per_lead,\n    baseline: baseline.avg_cost_per_lead,\n    change_percent: Number(costPerLeadIncreasePercent.toFixed(2))\n  });\n}\n\n// 3. Show rate falls by more than 15 percentage points\nconst showRateDropPoints = baseline.avg_show_rate - current.show_rate;\nif (showRateDropPoints > 15) {\n  anomalies.push({\n    metric: 'show_rate',\n    issue: 'Show rate fell more than 15 percentage points',\n    current: current.show_rate,\n    baseline: baseline.avg_show_rate,\n    drop_points: Number(showRateDropPoints.toFixed(2))\n  });\n}\n\n// 4. Speed to lead exceeds 10 minutes\nif (current.speed_to_lead_minutes > 10) {\n  anomalies.push({\n    metric: 'speed_to_lead_minutes',\n    issue: 'Speed to lead exceeds 10 minutes',\n    current: current.speed_to_lead_minutes,\n    threshold: 10\n  });\n}\n\n// 5. Data quality warnings exceed five records\nif (warningCount > 5) {\n  anomalies.push({\n    metric: 'data_quality_warning_count',\n    issue: 'Data quality warnings exceed five records',\n    current: warningCount,\n    threshold: 5\n  });\n}\n\nreturn [\n  {\n    json: {\n      report_date: current.report_date,\n      baseline_available: true,\n      anomaly_detected: anomalies.length > 0,\n      anomaly_status: anomalies.length > 0 ? 'anomaly_detected' : 'normal',\n      anomaly_count: anomalies.length,\n      anomalies: anomalies,\n      data_quality_warning_count: warningCount\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1824,
+        -160
+      ],
+      "id": "25c285c2-9008-4a8f-8f0a-1cfeff9a430e",
+      "name": "Detect Anomalies"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allPages = $input.all();\nlet allContacts = [];\n\nfor (const page of allPages) {\n  const contactsInPage = page.json.contacts || [];\n  allContacts = allContacts.concat(contactsInPage);\n}\n\nconst recordCount = allContacts.length;\nconst pageCount = allPages.length;\n\nreturn [{\n  json: {\n    contacts: allContacts,\n    page_count: pageCount,\n    record_count: recordCount\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -560
+      ],
+      "id": "6ecfa7f7-c8e1-44eb-a5a1-a97f9ad77935",
+      "name": "Track Contacts Pagination Stats"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allPages = $input.all();\nlet allOpportunities = [];\n\nfor (const page of allPages) {\n  const itemsInPage = page.json.opportunities || [];\n  allOpportunities = allOpportunities.concat(itemsInPage);\n}\n\nconst recordCount = allOpportunities.length;\nconst pageCount = allPages.length;\n\nreturn [{\n  json: {\n    opportunities: allOpportunities,\n    page_count: pageCount,\n    record_count: recordCount\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        -352
+      ],
+      "id": "b523c1fb-9502-4777-b936-92524a1cdebf",
+      "name": "Track Opportunities Pagination Stats"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allPages = $input.all();\nlet allAppointments = [];\n\nfor (const page of allPages) {\n  const itemsInPage = page.json.events || [];\n  allAppointments = allAppointments.concat(itemsInPage);\n}\n\nconst recordCount = allAppointments.length;\nconst pageCount = allPages.length;\n\nreturn [{\n  json: {\n    appointments: allAppointments,\n    page_count: pageCount,\n    record_count: recordCount\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        -160
+      ],
+      "id": "61e6db47-8f6b-413a-af86-d8c4b56e9972",
+      "name": "Track Appointments Pagination Stats"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      ad_spend: 1250.75,\n      campaign_id: \"campaign_test_001\",\n      campaign_name: \"HVAC Emergency Repair - Test Campaign\",\n      clicks: 340,\n      impressions: 15200,\n      date: $('Set Reporting Window').item.json.report_date\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        224
+      ],
+      "id": "8cad3ff8-8134-464d-8453-f4da27ac0df7",
+      "name": "Fetch Ad-Spend Data"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        816,
+        -192
+      ],
+      "id": "693ff79e-b025-48d4-a00b-e0c6d1700838",
+      "name": "Merge All Datasets"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1VK23VBr06iDtU4teig38g8OhiplDTIG26Zs8u_rGr2Y",
+          "mode": "list",
+          "cachedResultName": "Daily Report Google Sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VK23VBr06iDtU4teig38g8OhiplDTIG26Zs8u_rGr2Y/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1VK23VBr06iDtU4teig38g8OhiplDTIG26Zs8u_rGr2Y/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1424,
+        -160
+      ],
+      "id": "f288021a-7b2f-4a91-afc5-9d410c380a0b",
+      "name": "Read Historical Reports",
+      "retryOnFail": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gml6w6xc7PBsxQRc",
+          "name": "Google Sheets account 19"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all();\n\nif (rows.length === 0 || Object.keys(rows[0].json).length === 0) {\n  return [\n    {\n      json: {\n        baseline_available: false,\n        historical_rows: 0,\n        avg_unique_leads: 0,\n        avg_appointments_booked: 0,\n        avg_lead_to_appointment_rate: 0,\n        avg_show_rate: 0,\n        avg_close_rate: 0,\n        avg_cost_per_lead: 0,\n        avg_cost_per_appointment: 0,\n        avg_revenue_per_lead: 0,\n        avg_speed_to_lead_minutes: 0,\n        avg_no_show_recovery_rate: 0\n      }\n    }\n  ];\n}\n\nconst data = rows.map(item => item.json);\nconst average = field =>\n  data.reduce((sum, row) => sum + Number(row[field] || 0), 0) / data.length;\n\nreturn [\n  {\n    json: {\n      baseline_available: true,\n      historical_rows: data.length,\n      avg_unique_leads: average('unique_leads'),\n      avg_appointments_booked: average('appointments_booked'),\n      avg_lead_to_appointment_rate: average('lead_to_appointment_rate'),\n      avg_show_rate: average('show_rate'),\n      avg_close_rate: average('close_rate'),\n      avg_cost_per_lead: average('cost_per_lead'),\n      avg_cost_per_appointment: average('cost_per_appointment'),\n      avg_revenue_per_lead: average('revenue_per_lead'),\n      avg_speed_to_lead_minutes: average('speed_to_lead_minutes'),\n      avg_no_show_recovery_rate: average('no_show_recovery_rate')\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1648,
+        -160
+      ],
+      "id": "f1c8c218-d46c-4bcc-b038-a3f1914fdc23",
+      "name": "Load Historical Baseline"
+    },
+    {
+      "parameters": {
+        "sendTo": "kzarsalan3@gmail.com",
+        "subject": "=Daily HVAC Report - {{ $json.report_date }}",
+        "message": "=<pre>{{ $json.report_text }}</pre>\n\n<p><strong>Link to Full Report:</strong> \n<a href=\"https://docs.google.com/spreadsheets/d/1VK23VBr06iDtU4teig38g8OhiplDTIG26Zs8u_rGr2Y/edit\">View Google Sheet Report</a></p>\n\n<p>Regards,<br>HVAC Auto Automation System</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2352,
+        -160
+      ],
+      "id": "46db0f83-dedd-4cf5-8108-cb09b302fd27",
+      "name": "Send Daily HVAC Report Email Summary",
+      "webhookId": "302b9600-8159-4531-8ff3-ea4849ca4123",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "EusB1TZilQXg3t9b",
+          "name": "Gmail account 23"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1fNgRToMNCD5F5jCUd38xRP5BmEHhDY1vCpqphf3riYg",
+          "mode": "list",
+          "cachedResultName": "RunLog",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1fNgRToMNCD5F5jCUd38xRP5BmEHhDY1vCpqphf3riYg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1fNgRToMNCD5F5jCUd38xRP5BmEHhDY1vCpqphf3riYg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "run_id": "={{ $now }}",
+            "report_date": "={{ $('Format Daily Report').item.json.report_date }}",
+            "status": "success",
+            "pagination_pages_contacts": "={{ $('Track Contacts Pagination Stats').item.json.page_count }}",
+            "pagination_pages_opportunities": "={{ $('Track Opportunities Pagination Stats').item.json.page_count }}",
+            "pagination_pages_appointments": "={{ $('Track Appointments Pagination Stats').all()[0].json.page_count }}",
+            "data_quality_warnings": "={{ $('Format Daily Report').item.json.data_quality_warning_count }}",
+            "anomaly_detected": "={{ $('Format Daily Report').item.json.anomaly_detected }}",
+            "run_completed_at": "={{ $now }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "run_id",
+              "displayName": "run_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "report_date",
+              "displayName": "report_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pagination_pages_contacts",
+              "displayName": "pagination_pages_contacts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pagination_pages_opportunities",
+              "displayName": "pagination_pages_opportunities",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pagination_pages_appointments",
+              "displayName": "pagination_pages_appointments",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "data_quality_warnings",
+              "displayName": "data_quality_warnings",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "anomaly_detected",
+              "displayName": "anomaly_detected",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "run_completed_at",
+              "displayName": "run_completed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2528,
+        -160
+      ],
+      "id": "f1673959-7e91-43ce-b226-8d396a7f47d0",
+      "name": "Save Run Log",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gml6w6xc7PBsxQRc",
+          "name": "Google Sheets account 19"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Reporting Window",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Reporting Window": {
+      "main": [
+        [
+          {
+            "node": "Fetch GHL Contacts with Pagination",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch GHL Opportunities with Pagination",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch GHL Appointments with Pagination",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Voice-Call Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Ad-Spend Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch GHL Contacts with Pagination": {
+      "main": [
+        [
+          {
+            "node": "Track Contacts Pagination Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize GHL Contacts": {
+      "main": [
+        [
+          {
+            "node": "Match Contacts with Opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch GHL Opportunities with Pagination": {
+      "main": [
+        [
+          {
+            "node": "Track Opportunities Pagination Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize GHL Opportunities": {
+      "main": [
+        [
+          {
+            "node": "Match Contacts with Opportunities",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Match Contacts with Opportunities": {
+      "main": [
+        [
+          {
+            "node": "Prepare Daily Report Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Daily Report Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Datasets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Daily Metrics": {
+      "main": [
+        [
+          {
+            "node": "Read Historical Reports",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Daily Report": {
+      "main": [
+        [
+          {
+            "node": "Save Daily Report to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Daily Report to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Send Daily HVAC Report Email Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch GHL Appointments with Pagination": {
+      "main": [
+        [
+          {
+            "node": "Track Appointments Pagination Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Voice-Call Data": {
+      "main": [
+        [
+          {
+            "node": "Normalize Voice Calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Voice Calls": {
+      "main": [
+        [
+          {
+            "node": "Merge All Datasets",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Normalize GHL Appointments": {
+      "main": [
+        [
+          {
+            "node": "Merge All Datasets",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Validate Data Quality": {
+      "main": [
+        [
+          {
+            "node": "Calculate Daily Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Anomalies": {
+      "main": [
+        [
+          {
+            "node": "Format Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Track Contacts Pagination Stats": {
+      "main": [
+        [
+          {
+            "node": "Normalize GHL Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Track Opportunities Pagination Stats": {
+      "main": [
+        [
+          {
+            "node": "Normalize GHL Opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Track Appointments Pagination Stats": {
+      "main": [
+        [
+          {
+            "node": "Normalize GHL Appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Ad-Spend Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Datasets",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge All Datasets": {
+      "main": [
+        [
+          {
+            "node": "Validate Data Quality",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Historical Reports": {
+      "main": [
+        [
+          {
+            "node": "Load Historical Baseline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Historical Baseline": {
+      "main": [
+        [
+          {
+            "node": "Detect Anomalies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Daily HVAC Report Email Summary": {
+      "main": [
+        [
+          {
+            "node": "Save Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "timezone": "Asia/Karachi",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "8f01ded8-22ea-40d6-af37-5549829f368e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "36e5b8acffef6d9e199c770a496fc034332fcb50e464bcb97692c27f5a41e6f9"
+  },
+  "nodeGroups": [],
+  "id": "QN6meqhylmgI1JHQ",
+  "tags": []
+}
